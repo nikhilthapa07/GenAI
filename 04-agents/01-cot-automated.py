@@ -1,98 +1,125 @@
-from openai import OpenAI
-from dotenv import load_dotenv
-import os
 import json
+import os
+import sys
+
+from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("OPENAI_KEY")
 
 client = OpenAI(
-    api_key=api_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+    api_key=API_KEY,
 )
 
 
-def get_weather(city: str) -> str:
-    # API Call to get the weather
-    return "42 degrees C"
+def get_temperature(cityName):
+    print(f"===========get temp for {cityName}")
+    # fake api call
+    return "23 degree celcius"
 
 
-available_tools = {"get_weather": get_weather}
+def get_time(cityName):
+    print(f"===========get time for {cityName}")
+    # fake api call
+    return "12:30 AM"
 
-SYSTEM_PROMPT = """
-    You are a helpful AI Assistant who is specialized in resolving user query.
-    You work on start, plan, action, observe mode.
 
-    For the given user query and available tools, plan the step by step execution, based on the planning,
-    select the relevant tool from the available tool. And based on the tool selected you perform an action to call the tool.
+system_prompt = """
+You are an helpful AI assistant who specializes in helping user.
+You answer to the user by strictly taking these steps: plan, action, observe, output. You will only take one step at a time and wait for next step. When answering you will follow the output schema below:
+You have predefined set of tools you can use to answer the user.
+If the user's query can not be answered by using the tools you will politely respond the user that you can not help them.
+Refer to the examples on how you will respond to the user.
 
-    Wait for the observation and based on the observation from the tool call resolve the user query.
+output json schema:
+{{
+    "step": "string",
+    "content": "string",
+    "function": "the name of the function if the step is action",
+    "input": "the input parameter for the function"
+}}
 
-    Rules:
-    - Follow the Output JSON Format.
-    - Always perform one step at a time and wait for the next input.
-    - Carefully analyse the user query.
+Rules:
+1. you will strictly follow the steps.
+2. you will only take one step at a time and wait for next step.
+3. You will comply with the output json schema
+4. If the tool is available, you will pass the right parameter and use the return value when responding to user .
 
-    Output JSON Format:
-    {{
-        "step": "string",
-        "content": "string",
-        "function": "The name of function if the step is action",
-        "input": "The input parameter for the function",
-        "output": "The output of the function"
-    }}
+Available tools:
+- "get_temperature": Takes a city name argument and returns temperature of the city
+- "get_time": Takes a city name as argument and returns time of the city
 
-    Available Tools:
-    - "get_weather": Takes a city name as input and returns the weather of the city.
 
-    Example:
-    Input: What is the weather in Hyderabad?
-    Output: {{ "step": "plan", "content": "The user is interested in weather data of Hyderabad. So I will use the get_weather tool to get the weather data of Hyderabad." }}
-    Output: {{ "step": "plan", "content": "From the available tools, I should call get_weather" }}
-    Output: {{ "step": "action", "function": "get_weather", "input": "Hyderabad" }}
-    Output: {{ "step": "observe", "content": "24 degrees C" }}
-    Output: {{ "step": "output", "content": "The weather for Hyderabad seems to be 24 degrees C" }}
+Examples:
+Input: what is the current temperature in dubai
+Output: {{ "step": "plan", "content": "The user is interested in current temperature of the city. So I will use the get_temperature tool" }}
+Output: {{"step": "action", "function": "get_temperature", "input": "dubai"}}
+Output: {{"step": "observe", "content": "22 degree celcius" }}
+Output: {{"step": "output", "content": "The current temperature of dubai is 22 degree celcius" }}
+
+
+Input: why is the sky blue
+Output: {{ "step": "plan", "content": "The user is interested in knowing why sky color is blue. In the provided list of tools, I do not have any tool to get that information." }}
+Output: {{ "step": "output", "content": "Sorry, but I can not help you answer this"}}
 """
 
-messages = [
-    {"role": "system", "content": SYSTEM_PROMPT},
+query = ""
+
+while query.strip() == "":
+    print("How can I help you.")
+    query = input("> ")
+
+messages_list = [
+    {"role": "system", "content": system_prompt},
+    {"role": "user", "content": query},
 ]
 
-query = input("> ")
-messages.append({"role": "user", "content": query})
-
 while True:
-    response = client.chat.completions.create(
-        model="gemini-2.0-flash",
-        response_format={"type": "json_object"},
-        messages=messages,
-    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+            messages=messages_list,  # pyright: ignore
+        )
 
-    messages.append(
-        {"role": "assistant", "content": response.choices[0].message.content}
-    )
-    parsed_response = json.loads(response.choices[0].message.content)
+        # print("response_content =======", response.choices[0].message.content)
+        response_content = response.choices[0].message.content
 
-    if parsed_response.get("step") == "plan":
-        print(f"🧠: {parsed_response.get('content')}")
-        continue
-
-    if parsed_response.get("step") == "action":
-        tool_name = parsed_response.get("function")
+        parsed_response = json.loads(response_content)  # pyright: ignore
+        step = parsed_response.get("step")
+        content = parsed_response.get("content")
+        function = parsed_response.get("function")
         tool_input = parsed_response.get("input")
 
-        print(f"🔨 Calling Tool: {tool_name} with input: {tool_input}")
+        if step == "output":
+            print(f"🤖: {content}")
+            break
+        
+        if step == "action":
+            print(f"Calling Tool 🔨: {function}({tool_input})")
 
-        if available_tools.get(tool_name) != False:
-            output = available_tools[tool_name](tool_input)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": json.dumps({"step": "observe", "output": output}),
-                }
-            )
-            continue
+            # Actually call the function and get the result
+            if function == "get_temperature":
+                tool_result = get_temperature(tool_input)
+            elif function == "get_time":
+                tool_result = get_time(tool_input)
+            else:
+                tool_result = f"Error: unknown tool '{function}'"
 
-    if parsed_response.get("step") == "output":
-        print(f"🤖: {parsed_response.get('content')}")
-        break
+            print(f"Tool Result: {tool_result}")
+
+            # Feed the result back so the model can observe it
+            observe_message = json.dumps({"step": "observe", "content": tool_result})
+            messages_list.append({"role": "user", "content": observe_message})
+
+        else:
+            print(f"{step} 🤔: {content}")
+        messages_list.append(
+            {"role": "assistant", "content": response_content}  # pyright: ignore
+        )
+
+    except Exception as err:
+        print("error...", err)
+        sys.exit(1)
